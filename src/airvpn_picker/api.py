@@ -16,7 +16,7 @@ from urllib.request import Request, urlopen
 
 DEFAULT_STATUS_URL = "https://airvpn.org/api/status/"
 DEFAULT_USER_AGENT = (
-    "airvpn-wireguard-picker/0.1 (+https://github.com/alfredodeza/airvpn-wireguard-picker)"
+    "airvpn-wireguard-picker/0.1 (+https://github.com/alealv/airvpn-wireguard-picker)"
 )
 DEFAULT_TIMEOUT_SECONDS = 10
 

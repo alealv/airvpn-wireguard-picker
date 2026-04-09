@@ -246,8 +246,10 @@ def set_endpoint(
         # The file is deleted immediately after the wg set call.
         fd, psk_path = tempfile.mkstemp(prefix="airvpn-picker-psk-")
         try:
-            os.write(fd, psk.encode())
-            os.close(fd)
+            try:
+                os.write(fd, psk.encode())
+            finally:
+                os.close(fd)
             readd_cmd_with_psk = [*readd_cmd, "preshared-key", psk_path]
             _run_wg(readd_cmd_with_psk)
         finally:

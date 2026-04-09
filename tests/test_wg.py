@@ -14,6 +14,7 @@ from airvpn_picker.wg import (
     PEER_PUBKEY_LEN,
     WgCommandError,
     _parse_tab_output,
+    _read_peer_keepalive,
     parse_endpoint,
     parse_endpoints_output,
     set_endpoint,
@@ -86,6 +87,37 @@ class TestParseTabOutput:
     def test_off_maps_to_empty(self) -> None:
         output = f"{PEER_KEY}\toff\n"
         assert _parse_tab_output(output) == {PEER_KEY: ""}
+
+    def test_empty_output_returns_empty_dict(self) -> None:
+        assert _parse_tab_output("") == {}
+        assert _parse_tab_output("\n\n") == {}
+
+    def test_malformed_line_skipped(self) -> None:
+        # Line with no tab is silently skipped; valid lines still parsed.
+        output = f"garbage-no-tab\n{PEER_KEY}\t{FAKE_PSK}\n"
+        assert _parse_tab_output(output) == {PEER_KEY: FAKE_PSK}
+
+    def test_whitespace_stripped_from_value(self) -> None:
+        output = f"{PEER_KEY}\t  {FAKE_PSK}  \n"
+        assert _parse_tab_output(output) == {PEER_KEY: FAKE_PSK}
+
+
+class TestReadPeerKeepalive:
+    def test_returns_integer_value(self) -> None:
+        with patch(
+            "airvpn_picker.wg.subprocess.run",
+            return_value=_completed(f"{PEER_KEY}\t30\n"),
+        ):
+            assert _read_peer_keepalive("wg2", PEER_KEY, DEFAULT_WG_BINARY) == 30
+
+    def test_returns_default_on_non_integer_value(self) -> None:
+        # Should not raise; falls back to default.
+        with patch(
+            "airvpn_picker.wg.subprocess.run",
+            return_value=_completed(f"{PEER_KEY}\tnot-a-number\n"),
+        ):
+            result = _read_peer_keepalive("wg2", PEER_KEY, DEFAULT_WG_BINARY)
+            assert result == DEFAULT_PERSISTENT_KEEPALIVE
 
 
 class TestShowCurrentEndpointIp:
@@ -238,6 +270,19 @@ class TestSetEndpoint:
                 dry_run=True,
             )
         # 3 reads only; remove + readd are skipped
+        assert run.call_count == 3
+
+    def test_dry_run_no_psk_skips_destructive_calls(self) -> None:
+        # dry_run with no PSK: still 3 reads, no remove/readd.
+        side_effects = self._make_side_effects(psk="(none)")
+        with patch("airvpn_picker.wg.subprocess.run", side_effect=side_effects) as run:
+            set_endpoint(
+                interface="wg2",
+                peer_pubkey=PEER_KEY,
+                ip="1.2.3.4",
+                port=1637,
+                dry_run=True,
+            )
         assert run.call_count == 3
 
     def test_invalid_ip_raises_value_error(self) -> None:

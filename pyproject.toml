@@ -27,9 +27,9 @@ dependencies = []
 airvpn-picker = "airvpn_picker.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/alfredodeza/airvpn-wireguard-picker"
-Issues = "https://github.com/alfredodeza/airvpn-wireguard-picker/issues"
-Changelog = "https://github.com/alfredodeza/airvpn-wireguard-picker/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/alealv/airvpn-wireguard-picker"
+Issues = "https://github.com/alealv/airvpn-wireguard-picker/issues"
+Changelog = "https://github.com/alealv/airvpn-wireguard-picker/blob/main/CHANGELOG.md"
 
 [build-system]
 requires = ["uv_build>=0.11.5,<0.12.0"]

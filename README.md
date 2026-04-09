@@ -32,14 +32,38 @@ the resolver isn't ready before the tunnel comes up.
 
 ## Quickstart
 
+Inspect what the picker *would* do, without touching the tunnel:
+
+```bash
+uv run airvpn-picker \
+  --interface wg2 \
+  --peer-pubkey 'YOUR_PEER_PUBLIC_KEY' \
+  --dry-run \
+  --log-level DEBUG
+```
+
+Full CLI reference:
+
 ```bash
 uv run airvpn-picker --help
 ```
 
-Full documentation lives in [`docs/`](./docs):
+Or as a module if you've installed the package:
 
-- [`docs/algorithm.md`](docs/algorithm.md) — selection logic and hysteresis details
-- [`docs/opnsense.md`](docs/opnsense.md) — OPNsense install + configd + cron walkthrough
+```bash
+python -m airvpn_picker --help
+```
+
+## Documentation
+
+- [`docs/algorithm.md`](docs/algorithm.md) — selection logic, ranking,
+  hysteresis, why we use raw IPs instead of FQDNs.
+- [`docs/opnsense.md`](docs/opnsense.md) — step-by-step OPNsense install:
+  configd action, GUI cron, troubleshooting, uninstall.
+- [`contrib/actions_airvpnpicker.conf`](contrib/actions_airvpnpicker.conf)
+  — drop-in OPNsense configd action template.
+- [`contrib/install-opnsense.sh`](contrib/install-opnsense.sh) — reference
+  POSIX sh installer for OPNsense (idempotent, shellcheck-clean).
 
 ## Alternatives considered
 

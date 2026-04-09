@@ -9,5 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Initial project skeleton with `uv`, `ruff`, `ty`, `pytest`, `pre-commit`.
+- Project skeleton with `uv`, `ruff`, `ty`, `pytest`, `pre-commit`, GitHub
+  Actions CI on Python 3.11 and 3.12.
+- `airvpn_picker.api` — stdlib AirVPN status API client and `Server`
+  dataclass. Drops servers missing required fields or with unparseable
+  primary IPv4. 100% covered.
+- `airvpn_picker.selector` — pure filter + lowest-load winner with strict
+  tie-breaks (`currentload`, then `users`, then `bw`) and a hysteresis
+  threshold to prevent tunnel thrashing.
+- `airvpn_picker.wg` — `wg show` / `wg set` subprocess wrapper with
+  IPv4/IPv6 endpoint parsing and base64 pubkey validation.
+- `airvpn_picker.state` — JSON state file for the last decision plus
+  append-only JSONL run log.
+- `airvpn_picker.cli` — argparse entry point with explicit exit codes
+  for API failure, no candidates, wg failure, and bad arguments.
+- `contrib/actions_airvpnpicker.conf` — OPNsense configd action template.
+- `contrib/install-opnsense.sh` — idempotent POSIX sh installer for
+  OPNsense (shellcheck-clean).
+- `docs/algorithm.md` — full selection algorithm reference.
+- `docs/opnsense.md` — OPNsense install, GUI cron walkthrough,
+  troubleshooting, uninstall.
+- 60 unit tests with 96% line coverage. Real fixture captured from the
+  live AirVPN status API (255 servers).
 - MIT License.

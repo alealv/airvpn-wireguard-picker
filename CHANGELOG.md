@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `wg.set_endpoint` now uses peer remove + re-add instead of a naked
+  `wg set ... endpoint`. WireGuard's automatic endpoint roaming (per
+  `wg(8)`) was reverting the new endpoint within 1–3 seconds when an
+  existing authenticated session was active. The remove + re-add sequence
+  destroys the session keys so the new endpoint holds permanently.
+  The PSK, allowed-ips, and persistent-keepalive are read from the kernel
+  via `wg show <iface>` — no extra CLI flags or config files needed.
+- `selector.decide` now force-switches when the current server is in a
+  disallowed geo (country or continent), not only when it is unhealthy or
+  overloaded. Previously, a geo-excluded server could trigger hysteresis
+  and block the switch.
+
 ### Added
 
 - Project skeleton with `uv`, `ruff`, `ty`, `pytest`, `pre-commit`, GitHub

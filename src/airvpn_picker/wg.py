@@ -79,20 +79,11 @@ def parse_endpoints_output(output: str) -> dict[str, tuple[str, int] | None]:
     return result
 
 
-def show_current_endpoint_ip(
-    interface: str,
-    peer_pubkey: str,
-    wg_binary: str = DEFAULT_WG_BINARY,
-) -> str | None:
-    """Return the IP currently set as the endpoint for `peer_pubkey` on `interface`.
-
-    Returns None if the peer exists but has no endpoint, or if the peer is not
-    on the interface at all.
-    """
-    cmd = [wg_binary, "show", interface, "endpoints"]
+def _run_wg(cmd: list[str]) -> subprocess.CompletedProcess[str]:
+    """Run a `wg` command, raising :class:`WgCommandError` on any failure."""
     logger.debug("running: %s", cmd)
     try:
-        completed = subprocess.run(
+        return subprocess.run(
             cmd,
             check=True,
             capture_output=True,
@@ -106,11 +97,20 @@ def show_current_endpoint_ip(
     except subprocess.TimeoutExpired as exc:
         raise WgCommandError(f"`{' '.join(cmd)}` timed out after {exc.timeout}s") from exc
 
-    endpoints = parse_endpoints_output(completed.stdout)
-    endpoint = endpoints.get(peer_pubkey)
-    if endpoint is None:
-        return None
-    return endpoint[0]
+
+def show_current_endpoint_ip(
+    interface: str,
+    peer_pubkey: str,
+    wg_binary: str = DEFAULT_WG_BINARY,
+) -> str | None:
+    """Return the IP currently set as the endpoint for `peer_pubkey` on `interface`.
+
+    Returns None if the peer exists but has no endpoint, or if the peer is not
+    on the interface at all.
+    """
+    completed = _run_wg([wg_binary, "show", interface, "endpoints"])
+    endpoint = parse_endpoints_output(completed.stdout).get(peer_pubkey)
+    return endpoint[0] if endpoint is not None else None
 
 
 def set_endpoint(
@@ -127,28 +127,11 @@ def set_endpoint(
     Live, atomic operation: existing tunnel state is preserved and active TCP
     flows survive because the interface is not restarted.
     """
-    endpoint = _format_endpoint(ip, port)
-    cmd = [wg_binary, "set", interface, "peer", peer_pubkey, "endpoint", endpoint]
-
+    cmd = [wg_binary, "set", interface, "peer", peer_pubkey, "endpoint", _format_endpoint(ip, port)]
     if dry_run:
         logger.info("[dry-run] would run: %s", " ".join(cmd))
         return
-
-    logger.debug("running: %s", cmd)
-    try:
-        subprocess.run(
-            cmd,
-            check=True,
-            capture_output=True,
-            text=True,
-            timeout=DEFAULT_TIMEOUT_SECONDS,
-        )
-    except subprocess.CalledProcessError as exc:
-        raise WgCommandError(
-            f"`{' '.join(cmd)}` failed (exit {exc.returncode}): {exc.stderr.strip()}"
-        ) from exc
-    except subprocess.TimeoutExpired as exc:
-        raise WgCommandError(f"`{' '.join(cmd)}` timed out after {exc.timeout}s") from exc
+    _run_wg(cmd)
 
 
 def _format_endpoint(ip: str, port: int) -> str:

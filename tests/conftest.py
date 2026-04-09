@@ -1,4 +1,4 @@
-"""Shared pytest fixtures."""
+"""Shared pytest fixtures and test data builders."""
 
 from __future__ import annotations
 
@@ -8,6 +8,8 @@ from typing import Any
 
 import pytest
 
+from airvpn_picker.api import Server
+
 FIXTURES = Path(__file__).parent / "fixtures"
 
 
@@ -15,3 +17,36 @@ FIXTURES = Path(__file__).parent / "fixtures"
 def status_sample() -> dict[str, Any]:
     """Real AirVPN /api/status response captured from the live API."""
     return json.loads((FIXTURES / "status_sample.json").read_text())
+
+
+def make_server(
+    *,
+    name: str = "Test",
+    country: str = "de",
+    continent: str = "Europe",
+    location: str = "Frankfurt",
+    health: str = "ok",
+    load: int = 30,
+    users: int = 100,
+    bw: int = 100,
+    bw_max: int = 1000,
+    ips: tuple[str, ...] = ("1.2.3.4",),
+) -> Server:
+    """Build a `Server` for tests with sensible defaults.
+
+    Every field has a default so tests only override what they care about.
+    Keyword-only to keep call sites self-documenting.
+    """
+    return Server(
+        public_name=name,
+        country_code=country,
+        country_name=country.upper(),
+        continent=continent,
+        location=location,
+        health=health,
+        currentload=load,
+        users=users,
+        bw=bw,
+        bw_max=bw_max,
+        ips_v4=ips,
+    )

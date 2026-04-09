@@ -6,7 +6,7 @@ that it can be exhaustively unit tested with synthetic and fixture-based inputs.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Literal
 
 from airvpn_picker.api import Server
@@ -55,7 +55,6 @@ class Decision:
     current_endpoint_ip: str | None
     current_server: Server | None
     candidates_count: int
-    candidates: tuple[Server, ...] = field(repr=False)
 
 
 def filter_candidates(servers: list[Server], options: SelectorOptions) -> list[Server]:
@@ -110,7 +109,6 @@ def decide(
 
     candidates_sorted = sorted(candidates, key=_sort_key)
     winner = candidates_sorted[0]
-    candidates_tuple = tuple(candidates_sorted)
     candidates_count = len(candidates_sorted)
     current_server = (
         _find_server_by_ip(servers, current_endpoint_ip) if current_endpoint_ip else None
@@ -126,7 +124,6 @@ def decide(
             current_endpoint_ip=None,
             current_server=None,
             candidates_count=candidates_count,
-            candidates=candidates_tuple,
         )
 
     # 2. Already on the winner (any of its IPs) -> no-op.
@@ -139,7 +136,6 @@ def decide(
             current_endpoint_ip=current_endpoint_ip,
             current_server=current_server,
             candidates_count=candidates_count,
-            candidates=candidates_tuple,
         )
 
     # 3. Current endpoint is not in the candidate set (unhealthy or unknown) -> switch.
@@ -152,7 +148,6 @@ def decide(
             current_endpoint_ip=current_endpoint_ip,
             current_server=current_server,
             candidates_count=candidates_count,
-            candidates=candidates_tuple,
         )
 
     # 4. Hysteresis: only switch if the load improvement is meaningful.
@@ -166,7 +161,6 @@ def decide(
             current_endpoint_ip=current_endpoint_ip,
             current_server=current_server,
             candidates_count=candidates_count,
-            candidates=candidates_tuple,
         )
 
     return Decision(
@@ -177,7 +171,6 @@ def decide(
         current_endpoint_ip=current_endpoint_ip,
         current_server=current_server,
         candidates_count=candidates_count,
-        candidates=candidates_tuple,
     )
 
 
@@ -185,10 +178,5 @@ def _is_acceptable(server: Server, options: SelectorOptions) -> bool:
     return server.is_healthy and server.currentload <= options.max_load
 
 
-def _find_server_by_ip(servers: list[Server], ip: str | None) -> Server | None:
-    if ip is None:
-        return None
-    for server in servers:
-        if ip in server.ips_v4:
-            return server
-    return None
+def _find_server_by_ip(servers: list[Server], ip: str) -> Server | None:
+    return next((s for s in servers if ip in s.ips_v4), None)

@@ -43,6 +43,12 @@ class TestParseEndpointsOutput:
         result = parse_endpoints_output(output)
         assert result == {PEER_KEY: ("213.152.161.213", 1637)}
 
+    def test_skips_malformed_lines(self) -> None:
+        # A line with no tab separator is logged and skipped, not raised.
+        output = f"garbage-line\n{PEER_KEY}\t1.2.3.4:1637\n"
+        result = parse_endpoints_output(output)
+        assert result == {PEER_KEY: ("1.2.3.4", 1637)}
+
     def test_multiple_peers(self) -> None:
         other_key = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
         output = f"{PEER_KEY}\t213.152.161.213:1637\n{other_key}\t1.2.3.4:51820\n"
@@ -105,6 +111,16 @@ class TestShowCurrentEndpointIp:
                 side_effect=subprocess.CalledProcessError(1, "wg", stderr="boom"),
             ),
             pytest.raises(WgCommandError, match="boom"),
+        ):
+            show_current_endpoint_ip(interface="wg2", peer_pubkey=PEER_KEY)
+
+    def test_raises_when_wg_command_times_out(self) -> None:
+        with (
+            patch(
+                "airvpn_picker.wg.subprocess.run",
+                side_effect=subprocess.TimeoutExpired(cmd="wg", timeout=10),
+            ),
+            pytest.raises(WgCommandError, match="timed out"),
         ):
             show_current_endpoint_ip(interface="wg2", peer_pubkey=PEER_KEY)
 
@@ -173,6 +189,15 @@ class TestSetEndpoint:
             )
         run.assert_not_called()
 
+    def test_invalid_ip_raises_value_error(self) -> None:
+        with pytest.raises(ValueError, match="invalid endpoint IP"):
+            set_endpoint(
+                interface="wg2",
+                peer_pubkey=PEER_KEY,
+                ip="not-an-ip",
+                port=1637,
+            )
+
 
 class TestValidatePubkey:
     def test_accepts_valid(self) -> None:
@@ -185,4 +210,12 @@ class TestValidatePubkey:
     def test_rejects_non_base64(self) -> None:
         bad = "!" * PEER_PUBKEY_LEN
         with pytest.raises(ValueError, match="base64"):
+            validate_pubkey(bad)
+
+    def test_rejects_correct_length_but_wrong_decoded_size(self) -> None:
+        # 44 characters of valid base64 that decode to a non-32-byte string.
+        # "A" * 44 decodes to 33 bytes (44 * 6 / 8 = 33), so it passes the
+        # length and base64 checks but fails the decoded-length check.
+        bad = "A" * PEER_PUBKEY_LEN
+        with pytest.raises(ValueError, match="32 bytes"):
             validate_pubkey(bad)

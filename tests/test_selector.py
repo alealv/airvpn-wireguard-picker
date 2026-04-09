@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 
-from airvpn_picker.api import Server, parse_status
+from airvpn_picker.api import parse_status
 from airvpn_picker.selector import (
     Decision,
     NoCandidatesError,
@@ -14,30 +14,7 @@ from airvpn_picker.selector import (
     decide,
     filter_candidates,
 )
-
-
-def make_server(
-    name: str = "Test",
-    country: str = "de",
-    continent: str = "Europe",
-    health: str = "ok",
-    load: int = 30,
-    users: int = 100,
-    ips: tuple[str, ...] = ("1.2.3.4",),
-) -> Server:
-    return Server(
-        public_name=name,
-        country_code=country,
-        country_name=country.upper(),
-        continent=continent,
-        location="Frankfurt",
-        health=health,
-        currentload=load,
-        users=users,
-        bw=100,
-        bw_max=1000,
-        ips_v4=ips,
-    )
+from tests.conftest import make_server
 
 
 class TestFilterCandidates:
@@ -103,23 +80,10 @@ class TestDecide:
 
     def test_tiebreaks_by_users_then_bw(self) -> None:
         servers = [
-            make_server(name="A", load=10, users=200, ips=("10.0.0.1",)),
-            make_server(name="B", load=10, users=100, ips=("10.0.0.2",)),
-            make_server(name="C", load=10, users=100, ips=("10.0.0.3",)),
+            make_server(name="A", load=10, users=200, bw=100, ips=("10.0.0.1",)),
+            make_server(name="B", load=10, users=100, bw=100, ips=("10.0.0.2",)),
+            make_server(name="C", load=10, users=100, bw=50, ips=("10.0.0.3",)),
         ]
-        servers[2] = Server(
-            public_name="C",
-            country_code="de",
-            country_name="DE",
-            continent="Europe",
-            location="Frankfurt",
-            health="ok",
-            currentload=10,
-            users=100,
-            bw=50,  # lower than B's 100
-            bw_max=1000,
-            ips_v4=("10.0.0.3",),
-        )
         result = decide(servers=servers, current_endpoint_ip=None, options=SelectorOptions())
         assert result.winner.public_name == "C"
 

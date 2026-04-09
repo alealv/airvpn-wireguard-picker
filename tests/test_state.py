@@ -6,27 +6,23 @@ import json
 from pathlib import Path
 from typing import Any
 
-from airvpn_picker.api import Server
 from airvpn_picker.selector import Decision
 from airvpn_picker.state import append_log, load_state, save_state
+from tests.conftest import make_server
 
 
 def make_decision(
     action: Any = "switch",
     reason: Any = "no-current",
 ) -> Decision:
-    winner = Server(
-        public_name="Adhil",
-        country_code="de",
-        country_name="Germany",
-        continent="Europe",
-        location="Frankfurt",
-        health="ok",
-        currentload=26,
+    winner = make_server(
+        name="Adhil",
+        country="de",
+        load=26,
         users=359,
         bw=500,
         bw_max=2000,
-        ips_v4=("37.46.199.66",),
+        ips=("37.46.199.66",),
     )
     return Decision(
         action=action,
@@ -36,7 +32,6 @@ def make_decision(
         current_endpoint_ip=None,
         current_server=None,
         candidates_count=7,
-        candidates=(winner,),
     )
 
 

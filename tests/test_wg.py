@@ -8,9 +8,12 @@ from unittest.mock import patch
 import pytest
 
 from airvpn_picker.wg import (
+    DEFAULT_ALLOWED_IPS,
+    DEFAULT_PERSISTENT_KEEPALIVE,
     DEFAULT_WG_BINARY,
     PEER_PUBKEY_LEN,
     WgCommandError,
+    _parse_tab_output,
     parse_endpoint,
     parse_endpoints_output,
     set_endpoint,
@@ -19,6 +22,11 @@ from airvpn_picker.wg import (
 )
 
 PEER_KEY = "PyLCXAQT8KkM4T+dUsOQfn+Ub3pGxfGlxkIApuig+hk="
+FAKE_PSK = "BAplilAyJY7PXGxhxRBPneIgkUt9KZPMDP/z7W+wSAc="
+
+
+def _completed(stdout: str = "", returncode: int = 0) -> subprocess.CompletedProcess[str]:
+    return subprocess.CompletedProcess(args=[], returncode=returncode, stdout=stdout, stderr="")
 
 
 class TestParseEndpoint:
@@ -66,19 +74,25 @@ class TestParseEndpointsOutput:
         assert parse_endpoints_output("\n") == {}
 
 
-class TestShowCurrentEndpointIp:
-    def _mock_run(self, stdout: str, returncode: int = 0):
-        return subprocess.CompletedProcess(
-            args=["wg", "show", "wg2", "endpoints"],
-            returncode=returncode,
-            stdout=stdout,
-            stderr="",
-        )
+class TestParseTabOutput:
+    def test_parses_psk(self) -> None:
+        output = f"{PEER_KEY}\t{FAKE_PSK}\n"
+        assert _parse_tab_output(output) == {PEER_KEY: FAKE_PSK}
 
+    def test_none_literal_maps_to_empty(self) -> None:
+        output = f"{PEER_KEY}\t(none)\n"
+        assert _parse_tab_output(output) == {PEER_KEY: ""}
+
+    def test_off_maps_to_empty(self) -> None:
+        output = f"{PEER_KEY}\toff\n"
+        assert _parse_tab_output(output) == {PEER_KEY: ""}
+
+
+class TestShowCurrentEndpointIp:
     def test_returns_ip_for_known_peer(self) -> None:
         with patch(
             "airvpn_picker.wg.subprocess.run",
-            return_value=self._mock_run(f"{PEER_KEY}\t213.152.161.213:1637\n"),
+            return_value=_completed(f"{PEER_KEY}\t213.152.161.213:1637\n"),
         ) as run:
             ip = show_current_endpoint_ip(interface="wg2", peer_pubkey=PEER_KEY)
         assert ip == "213.152.161.213"
@@ -93,14 +107,14 @@ class TestShowCurrentEndpointIp:
     def test_returns_none_when_endpoint_unset(self) -> None:
         with patch(
             "airvpn_picker.wg.subprocess.run",
-            return_value=self._mock_run(f"{PEER_KEY}\t(none)\n"),
+            return_value=_completed(f"{PEER_KEY}\t(none)\n"),
         ):
             assert show_current_endpoint_ip(interface="wg2", peer_pubkey=PEER_KEY) is None
 
     def test_returns_none_when_peer_absent(self) -> None:
         with patch(
             "airvpn_picker.wg.subprocess.run",
-            return_value=self._mock_run("OTHERKEY=\t1.2.3.4:51820\n"),
+            return_value=_completed("OTHERKEY=\t1.2.3.4:51820\n"),
         ):
             assert show_current_endpoint_ip(interface="wg2", peer_pubkey=PEER_KEY) is None
 
@@ -126,60 +140,96 @@ class TestShowCurrentEndpointIp:
 
 
 class TestSetEndpoint:
-    def test_calls_wg_set_with_correct_args(self) -> None:
-        completed = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
-        with patch("airvpn_picker.wg.subprocess.run", return_value=completed) as run:
-            set_endpoint(
-                interface="wg2",
-                peer_pubkey=PEER_KEY,
-                ip="37.46.199.66",
-                port=1637,
-            )
-        run.assert_called_once_with(
-            [
-                DEFAULT_WG_BINARY,
-                "set",
-                "wg2",
-                "peer",
-                PEER_KEY,
-                "endpoint",
-                "37.46.199.66:1637",
-            ],
-            check=True,
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
+    """set_endpoint does: read PSK + read allowed-ips + read keepalive + remove + readd."""
+
+    def _make_side_effects(
+        self,
+        psk: str = FAKE_PSK,
+        allowed_ips: str = "0.0.0.0/0 ::/0",
+        keepalive: str = "25",
+    ) -> list[subprocess.CompletedProcess[str]]:
+        """Return mock subprocess.run return values for the 5 calls set_endpoint makes."""
+        return [
+            _completed(f"{PEER_KEY}\t{psk}\n"),  # wg show preshared-keys
+            _completed(f"{PEER_KEY}\t{allowed_ips}\n"),  # wg show allowed-ips
+            _completed(f"{PEER_KEY}\t{keepalive}\n"),  # wg show persistent-keepalive
+            _completed(),  # wg set peer remove
+            _completed(),  # wg set peer readd
+        ]
+
+    def test_calls_remove_then_readd(self) -> None:
+        side_effects = self._make_side_effects()
+        with patch("airvpn_picker.wg.subprocess.run", side_effect=side_effects) as run:
+            set_endpoint(interface="wg2", peer_pubkey=PEER_KEY, ip="37.46.199.66", port=1637)
+
+        calls = run.call_args_list
+        # 3 reads + 1 remove + 1 readd = 5 total
+        assert len(calls) == 5
+
+        # Call 0: read preshared-keys
+        assert calls[0].args[0] == [DEFAULT_WG_BINARY, "show", "wg2", "preshared-keys"]
+
+        # Call 1: read allowed-ips
+        assert calls[1].args[0] == [DEFAULT_WG_BINARY, "show", "wg2", "allowed-ips"]
+
+        # Call 2: read persistent-keepalive
+        assert calls[2].args[0] == [DEFAULT_WG_BINARY, "show", "wg2", "persistent-keepalive"]
+
+        # Call 3: remove the peer
+        assert calls[3].args[0] == [DEFAULT_WG_BINARY, "set", "wg2", "peer", PEER_KEY, "remove"]
+
+        # Call 4: re-add with new endpoint (includes preshared-key <tmpfile>)
+        readd_args = calls[4].args[0]
+        assert readd_args[0] == DEFAULT_WG_BINARY
+        assert "set" in readd_args
+        assert "peer" in readd_args
+        assert PEER_KEY in readd_args
+        assert "allowed-ips" in readd_args
+        assert "0.0.0.0/0,::/0" in readd_args
+        assert "persistent-keepalive" in readd_args
+        assert "25" in readd_args
+        assert "endpoint" in readd_args
+        assert "37.46.199.66:1637" in readd_args
+        assert "preshared-key" in readd_args
+
+    def test_readd_without_psk_when_peer_has_none(self) -> None:
+        # When peer has no PSK, wg show returns "(none)" -> _parse_tab_output -> ""
+        side_effects = self._make_side_effects(psk="(none)")
+        with patch("airvpn_picker.wg.subprocess.run", side_effect=side_effects) as run:
+            set_endpoint(interface="wg2", peer_pubkey=PEER_KEY, ip="1.2.3.4", port=1637)
+
+        calls = run.call_args_list
+        assert len(calls) == 5
+        readd_args = calls[4].args[0]
+        assert "preshared-key" not in readd_args
 
     def test_brackets_ipv6(self) -> None:
-        completed = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
-        with patch("airvpn_picker.wg.subprocess.run", return_value=completed) as run:
-            set_endpoint(
-                interface="wg2",
-                peer_pubkey=PEER_KEY,
-                ip="2001:db8::1",
-                port=1637,
-            )
-        called_args = run.call_args.args[0]
-        assert "[2001:db8::1]:1637" in called_args
+        side_effects = self._make_side_effects()
+        with patch("airvpn_picker.wg.subprocess.run", side_effect=side_effects) as run:
+            set_endpoint(interface="wg2", peer_pubkey=PEER_KEY, ip="2001:db8::1", port=1637)
 
-    def test_raises_on_failure(self) -> None:
+        readd_args = run.call_args_list[4].args[0]
+        assert "[2001:db8::1]:1637" in readd_args
+
+    def test_raises_on_remove_failure(self) -> None:
+        # Fail on the 4th call (remove)
+        responses: list = [
+            _completed(f"{PEER_KEY}\t{FAKE_PSK}\n"),
+            _completed(f"{PEER_KEY}\t0.0.0.0/0 ::/0\n"),
+            _completed(f"{PEER_KEY}\t25\n"),
+            subprocess.CalledProcessError(1, "wg", stderr="permission denied"),
+        ]
         with (
-            patch(
-                "airvpn_picker.wg.subprocess.run",
-                side_effect=subprocess.CalledProcessError(1, "wg", stderr="permission"),
-            ),
-            pytest.raises(WgCommandError, match="permission"),
+            patch("airvpn_picker.wg.subprocess.run", side_effect=responses),
+            pytest.raises(WgCommandError, match="permission denied"),
         ):
-            set_endpoint(
-                interface="wg2",
-                peer_pubkey=PEER_KEY,
-                ip="1.2.3.4",
-                port=1637,
-            )
+            set_endpoint(interface="wg2", peer_pubkey=PEER_KEY, ip="1.2.3.4", port=1637)
 
     def test_dry_run_skips_subprocess(self) -> None:
-        with patch("airvpn_picker.wg.subprocess.run") as run:
+        # dry_run should still call the 3 read commands to log what would happen,
+        # but skip the destructive remove + readd calls.
+        side_effects = self._make_side_effects()
+        with patch("airvpn_picker.wg.subprocess.run", side_effect=side_effects) as run:
             set_endpoint(
                 interface="wg2",
                 peer_pubkey=PEER_KEY,
@@ -187,7 +237,8 @@ class TestSetEndpoint:
                 port=1637,
                 dry_run=True,
             )
-        run.assert_not_called()
+        # 3 reads only; remove + readd are skipped
+        assert run.call_count == 3
 
     def test_invalid_ip_raises_value_error(self) -> None:
         with pytest.raises(ValueError, match="invalid endpoint IP"):
@@ -197,6 +248,34 @@ class TestSetEndpoint:
                 ip="not-an-ip",
                 port=1637,
             )
+
+    def test_uses_default_allowed_ips_when_peer_has_none(self) -> None:
+        side_effects = [
+            _completed(f"{PEER_KEY}\t{FAKE_PSK}\n"),
+            _completed(f"{PEER_KEY}\t(none)\n"),  # no allowed-ips
+            _completed(f"{PEER_KEY}\t25\n"),
+            _completed(),
+            _completed(),
+        ]
+        with patch("airvpn_picker.wg.subprocess.run", side_effect=side_effects) as run:
+            set_endpoint(interface="wg2", peer_pubkey=PEER_KEY, ip="1.2.3.4", port=1637)
+
+        readd_args = run.call_args_list[4].args[0]
+        assert DEFAULT_ALLOWED_IPS in readd_args
+
+    def test_uses_default_keepalive_when_off(self) -> None:
+        side_effects = [
+            _completed(f"{PEER_KEY}\t{FAKE_PSK}\n"),
+            _completed(f"{PEER_KEY}\t0.0.0.0/0 ::/0\n"),
+            _completed(f"{PEER_KEY}\toff\n"),  # keepalive off
+            _completed(),
+            _completed(),
+        ]
+        with patch("airvpn_picker.wg.subprocess.run", side_effect=side_effects) as run:
+            set_endpoint(interface="wg2", peer_pubkey=PEER_KEY, ip="1.2.3.4", port=1637)
+
+        readd_args = run.call_args_list[4].args[0]
+        assert str(DEFAULT_PERSISTENT_KEEPALIVE) in readd_args
 
 
 class TestValidatePubkey:

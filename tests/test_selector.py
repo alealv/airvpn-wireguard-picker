@@ -110,6 +110,42 @@ class TestDecide:
         assert result.action == "switch"
         assert result.reason == "current-unhealthy"
 
+    def test_force_switch_when_current_is_in_disallowed_geo(self) -> None:
+        # Current endpoint is a healthy, low-load server — but in a country the
+        # operator has explicitly excluded via --allowed-countries. Hysteresis
+        # must NOT apply here: the operator wants to leave this geo entirely.
+        # Regression test for a bug observed in live testing where a Dutch
+        # server was kept despite the allowlist being {de}.
+        servers = [
+            make_server(name="NLServer", country="nl", load=38, ips=("10.0.0.1",)),
+            make_server(name="DEServer", country="de", load=31, ips=("10.0.0.2",)),
+        ]
+        result = decide(
+            servers=servers,
+            current_endpoint_ip="10.0.0.1",
+            options=SelectorOptions(allowed_countries=("de",), hysteresis_pp=15),
+        )
+        # Without the fix, 38 - 31 = 7pp < 15pp -> below-hysteresis noop.
+        # With the fix, NL is not in the candidate set -> current-unhealthy switch.
+        assert result.action == "switch"
+        assert result.reason == "current-unhealthy"
+        assert result.winner.public_name == "DEServer"
+
+    def test_force_switch_when_current_is_in_disallowed_continent(self) -> None:
+        # Same bug, continent variant.
+        servers = [
+            make_server(name="USServer", continent="America", load=10, ips=("10.0.0.1",)),
+            make_server(name="DEServer", continent="Europe", load=40, ips=("10.0.0.2",)),
+        ]
+        result = decide(
+            servers=servers,
+            current_endpoint_ip="10.0.0.1",
+            options=SelectorOptions(allowed_continents=("Europe",), hysteresis_pp=15),
+        )
+        assert result.action == "switch"
+        assert result.reason == "current-unhealthy"
+        assert result.winner.public_name == "DEServer"
+
     def test_hysteresis_blocks_small_improvement(self) -> None:
         servers = [
             make_server(name="Current", load=50, ips=("10.0.0.1",)),

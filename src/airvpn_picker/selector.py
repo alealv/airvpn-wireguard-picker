@@ -110,6 +110,7 @@ def decide(
     candidates_sorted = sorted(candidates, key=_sort_key)
     winner = candidates_sorted[0]
     candidates_count = len(candidates_sorted)
+    candidate_set = frozenset(id(s) for s in candidates_sorted)
     current_server = (
         _find_server_by_ip(servers, current_endpoint_ip) if current_endpoint_ip else None
     )
@@ -138,8 +139,14 @@ def decide(
             candidates_count=candidates_count,
         )
 
-    # 3. Current endpoint is not in the candidate set (unhealthy or unknown) -> switch.
-    if current_server is None or not _is_acceptable(current_server, options):
+    # 3. Current endpoint is not in the candidate set -> switch.
+    #
+    # "Not in candidate set" covers all the cases we want to force-switch on:
+    # current server is unknown to the API, unhealthy, overloaded, OR in a
+    # country/continent the operator has explicitly excluded. All of those
+    # mean "the operator wants off this server" and hysteresis must NOT
+    # apply — see regression tests in test_selector.py.
+    if current_server is None or id(current_server) not in candidate_set:
         return Decision(
             action="switch",
             reason="current-unhealthy",
@@ -172,10 +179,6 @@ def decide(
         current_server=current_server,
         candidates_count=candidates_count,
     )
-
-
-def _is_acceptable(server: Server, options: SelectorOptions) -> bool:
-    return server.is_healthy and server.currentload <= options.max_load
 
 
 def _find_server_by_ip(servers: list[Server], ip: str) -> Server | None:

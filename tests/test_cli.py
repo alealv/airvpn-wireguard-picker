@@ -40,6 +40,9 @@ def base_argv(tmp_path: Path) -> list[str]:
         str(tmp_path / "picker.log"),
         "--log-level",
         "DEBUG",
+        # Default-off in tests so the 30s sleep isn't hit; the post-switch
+        # behaviour has its own dedicated tests below.
+        "--no-post-switch-check",
     ]
 
 
@@ -163,3 +166,74 @@ def test_country_filter_picks_only_german_server(
     log = json.loads((tmp_path / "picker.log").read_text())
     assert log["winner"]["country"] == "de"
     mock_set.assert_called_once()
+
+
+# ── Post-switch handshake check ──────────────────────────────────────────────
+
+
+def _enable_post_switch(argv: list[str], wait_s: float = 0.0) -> list[str]:
+    """Replace --no-post-switch-check with --post-switch-check + 0s wait."""
+    out = [a for a in argv if a != "--no-post-switch-check"]
+    out += ["--post-switch-check", "--post-switch-wait", str(wait_s)]
+    return out
+
+
+def test_post_switch_no_handshake_advance_increments_penalty(
+    base_argv: list[str],
+    status_sample: dict[str, Any],
+    tmp_path: Path,
+) -> None:
+    """Handshake epoch unchanged after the switch -> penalty for that IP."""
+    argv = _enable_post_switch(base_argv)
+
+    with (
+        patch("airvpn_picker.cli.fetch_status", return_value=parse_status(status_sample)),
+        patch("airvpn_picker.cli.show_current_endpoint_ip", return_value=None),
+        patch("airvpn_picker.cli.set_endpoint"),
+        # Same epoch before and after means the new endpoint never handshaked.
+        patch("airvpn_picker.cli.show_latest_handshake", return_value=1000),
+    ):
+        assert main(argv) == EXIT_OK
+
+    state = json.loads((tmp_path / "state.json").read_text())
+    penalties = state["penalties"]
+    assert len(penalties) == 1
+    [(_ip, record)] = list(penalties.items())
+    assert record["count"] == 1
+
+
+def test_post_switch_handshake_advance_does_not_penalize(
+    base_argv: list[str],
+    status_sample: dict[str, Any],
+    tmp_path: Path,
+) -> None:
+    """Handshake epoch advances after the switch -> no penalty."""
+    argv = _enable_post_switch(base_argv)
+
+    with (
+        patch("airvpn_picker.cli.fetch_status", return_value=parse_status(status_sample)),
+        patch("airvpn_picker.cli.show_current_endpoint_ip", return_value=None),
+        patch("airvpn_picker.cli.set_endpoint"),
+        # Returns 1000 the first time (pre-switch) and 2000 the second (post-switch).
+        patch("airvpn_picker.cli.show_latest_handshake", side_effect=[1000, 2000]),
+    ):
+        assert main(argv) == EXIT_OK
+
+    state = json.loads((tmp_path / "state.json").read_text())
+    assert state["penalties"] == {}
+
+
+def test_post_switch_check_disabled_skips_handshake_call(
+    base_argv: list[str],
+    status_sample: dict[str, Any],
+) -> None:
+    """--no-post-switch-check should not call show_latest_handshake at all."""
+    with (
+        patch("airvpn_picker.cli.fetch_status", return_value=parse_status(status_sample)),
+        patch("airvpn_picker.cli.show_current_endpoint_ip", return_value=None),
+        patch("airvpn_picker.cli.set_endpoint"),
+        patch("airvpn_picker.cli.show_latest_handshake") as mock_hs,
+    ):
+        assert main(base_argv) == EXIT_OK
+
+    mock_hs.assert_not_called()

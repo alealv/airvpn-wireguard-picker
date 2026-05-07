@@ -40,13 +40,20 @@ from airvpn_picker.state import (
     append_log,
     cached_ping,
     decay_penalties,
+    increment_penalty,
     load_state,
     merge_ping_cache,
     penalty_for,
     save_state,
     stale_ips,
 )
-from airvpn_picker.wg import WgCommandError, set_endpoint, show_current_endpoint_ip, validate_pubkey
+from airvpn_picker.wg import (
+    WgCommandError,
+    set_endpoint,
+    show_current_endpoint_ip,
+    show_latest_handshake,
+    validate_pubkey,
+)
 
 DEFAULT_PORT = 1637
 DEFAULT_LOG_FILE = Path("/var/log/airvpn-picker.log")
@@ -169,6 +176,27 @@ def build_parser() -> argparse.ArgumentParser:
         help=f"Where to persist last decision + caches (default: {DEFAULT_STATE_FILE})",
     )
 
+    post = parser.add_argument_group("post-switch verification")
+    post.add_argument(
+        "--post-switch-check",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "After a switch, wait then read wg latest-handshakes; if the new "
+            "endpoint did not handshake, increment the penalty for that IP "
+            "(default: enabled)"
+        ),
+    )
+    post.add_argument(
+        "--post-switch-wait",
+        type=float,
+        default=30.0,
+        help=(
+            "Seconds to wait between set_endpoint and the handshake check "
+            "(default: 30). WireGuard's handshake interval is up to 25s."
+        ),
+    )
+
     op = parser.add_argument_group("operational")
     op.add_argument(
         "--dry-run",
@@ -233,8 +261,13 @@ def _build_options(args: argparse.Namespace, weights: ScoreWeights) -> SelectorO
     )
 
 
-def main(argv: list[str] | None = None) -> int:
-    """Run the picker. Returns a process exit code."""
+def main(argv: list[str] | None = None) -> int:  # noqa: PLR0912, PLR0915
+    """Run the picker. Returns a process exit code.
+
+    Inherent orchestration complexity (CLI parse + state load + API + ping +
+    decide + switch + verify + persist) — refactoring just shuffles the same
+    branches into smaller functions without making the data flow clearer.
+    """
     parser = build_parser()
     args = parser.parse_args(argv)
     _setup_logging(args.log_level)
@@ -306,6 +339,19 @@ def main(argv: list[str] | None = None) -> int:
     _log_decision(decision)
 
     if decision.action == "switch":
+        # Snapshot the handshake epoch BEFORE the switch so we can detect a
+        # post-switch handshake regression (no advance = the new endpoint
+        # didn't accept us, deserves a penalty).
+        handshake_before = 0
+        if args.post_switch_check and not args.dry_run:
+            try:
+                handshake_before = show_latest_handshake(
+                    interface=args.interface,
+                    peer_pubkey=args.peer_pubkey,
+                )
+            except WgCommandError as exc:
+                logger.warning("could not read pre-switch handshake: %s", exc)
+
         try:
             set_endpoint(
                 interface=args.interface,
@@ -318,6 +364,16 @@ def main(argv: list[str] | None = None) -> int:
             logger.error("wg set failed: %s", exc)
             return EXIT_WG_FAILURE
 
+        if args.post_switch_check and not args.dry_run:
+            penalties = _verify_handshake_or_penalize(
+                interface=args.interface,
+                peer_pubkey=args.peer_pubkey,
+                ip=decision.endpoint_ip,
+                wait_s=args.post_switch_wait,
+                handshake_before=handshake_before,
+                penalties=penalties,
+            )
+
     if not args.dry_run:
         save_state(
             args.state_file,
@@ -328,6 +384,46 @@ def main(argv: list[str] | None = None) -> int:
         append_log(args.log_file, decision)
 
     return EXIT_OK
+
+
+def _verify_handshake_or_penalize(
+    *,
+    interface: str,
+    peer_pubkey: str,
+    ip: str,
+    wait_s: float,
+    handshake_before: int,
+    penalties: dict,
+) -> dict:
+    """Sleep, then check if the peer handshaked after the switch.
+
+    Returns the (possibly mutated) penalties dict. If the handshake epoch did
+    not advance past ``handshake_before``, the destination IP gets a penalty
+    bump so the next picker run prefers a different server.
+    """
+    logger.info("post-switch: sleeping %.0fs before handshake check", wait_s)
+    time.sleep(wait_s)
+    try:
+        handshake_after = show_latest_handshake(interface=interface, peer_pubkey=peer_pubkey)
+    except WgCommandError as exc:
+        logger.warning("could not read post-switch handshake: %s", exc)
+        return penalties
+
+    if handshake_after > handshake_before:
+        logger.info(
+            "post-switch: handshake advanced %d -> %d (peer accepted us)",
+            handshake_before,
+            handshake_after,
+        )
+        return penalties
+
+    logger.warning(
+        "post-switch: handshake did not advance (still %d after %.0fs); penalizing %s",
+        handshake_before,
+        wait_s,
+        ip,
+    )
+    return increment_penalty(penalties, ip, time.time())
 
 
 def _log_decision(decision: Decision) -> None:

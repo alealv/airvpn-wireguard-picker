@@ -28,8 +28,10 @@ def make_server(
     health: str = "ok",
     load: int = 30,
     users: int = 100,
+    users_max: int = 1000,
     bw: int = 100,
     bw_max: int = 1000,
+    scorebase: int = 0,
     ips: tuple[str, ...] = ("1.2.3.4",),
 ) -> Server:
     """Build a `Server` for tests with sensible defaults.
@@ -46,7 +48,14 @@ def make_server(
         health=health,
         currentload=load,
         users=users,
+        users_max=users_max,
         bw=bw,
         bw_max=bw_max,
+        scorebase=scorebase,
         ips_v4=ips,
     )
+
+
+def constant_ping(_ip: str) -> float:
+    """Stand-in ping_lookup that returns 50ms for every IP."""
+    return 50.0

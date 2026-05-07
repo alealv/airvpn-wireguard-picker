@@ -140,6 +140,28 @@ def show_current_endpoint_ip(
     return endpoint[0] if endpoint is not None else None
 
 
+def show_latest_handshake(
+    interface: str,
+    peer_pubkey: str,
+    wg_binary: str = DEFAULT_WG_BINARY,
+) -> int:
+    r"""Return the unix epoch of the peer's most recent successful handshake.
+
+    Returns 0 if the peer has never handshaken or is not on the interface.
+    Format from wg(8): one ``<pubkey>\t<epoch>`` line per peer; epoch is 0
+    when no handshake has occurred yet.
+    """
+    completed = _run_wg([wg_binary, "show", interface, "latest-handshakes"])
+    raw = _parse_tab_output(completed.stdout).get(peer_pubkey, "")
+    if not raw:
+        return 0
+    try:
+        return int(raw)
+    except ValueError:
+        logger.debug("could not parse handshake epoch %r", raw)
+        return 0
+
+
 def _read_peer_psk(
     interface: str,
     peer_pubkey: str,

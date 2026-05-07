@@ -19,6 +19,7 @@ from airvpn_picker.wg import (
     parse_endpoints_output,
     set_endpoint,
     show_current_endpoint_ip,
+    show_latest_handshake,
     validate_pubkey,
 )
 
@@ -169,6 +170,44 @@ class TestShowCurrentEndpointIp:
             pytest.raises(WgCommandError, match="timed out"),
         ):
             show_current_endpoint_ip(interface="wg2", peer_pubkey=PEER_KEY)
+
+
+class TestShowLatestHandshake:
+    def test_returns_epoch_for_known_peer(self) -> None:
+        with patch(
+            "airvpn_picker.wg.subprocess.run",
+            return_value=_completed(f"{PEER_KEY}\t1778141234\n"),
+        ) as run:
+            ts = show_latest_handshake(interface="wg2", peer_pubkey=PEER_KEY)
+        assert ts == 1778141234
+        run.assert_called_once_with(
+            [DEFAULT_WG_BINARY, "show", "wg2", "latest-handshakes"],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+
+    def test_returns_zero_when_peer_never_handshaked(self) -> None:
+        with patch(
+            "airvpn_picker.wg.subprocess.run",
+            return_value=_completed(f"{PEER_KEY}\t0\n"),
+        ):
+            assert show_latest_handshake(interface="wg2", peer_pubkey=PEER_KEY) == 0
+
+    def test_returns_zero_when_peer_absent(self) -> None:
+        with patch(
+            "airvpn_picker.wg.subprocess.run",
+            return_value=_completed("OTHERKEY=\t1234\n"),
+        ):
+            assert show_latest_handshake(interface="wg2", peer_pubkey=PEER_KEY) == 0
+
+    def test_returns_zero_when_value_unparseable(self) -> None:
+        with patch(
+            "airvpn_picker.wg.subprocess.run",
+            return_value=_completed(f"{PEER_KEY}\tnotanumber\n"),
+        ):
+            assert show_latest_handshake(interface="wg2", peer_pubkey=PEER_KEY) == 0
 
 
 class TestSetEndpoint:

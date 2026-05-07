@@ -48,9 +48,18 @@ class Server:
     health: str
     currentload: int
     users: int
+    users_max: int
     bw: int
     bw_max: int
+    scorebase: int
     ips_v4: tuple[str, ...]
+
+    @property
+    def users_pct(self) -> float:
+        """Percentage of cap (0..100). Returns currentload as fallback if cap is 0."""
+        if self.users_max <= 0:
+            return float(self.currentload)
+        return min(100.0, 100.0 * self.users / self.users_max)
 
     @property
     def ip_v4_in1(self) -> str:
@@ -127,8 +136,10 @@ def _build_server(entry: dict[str, Any]) -> Server | None:
         health=str(entry["health"]),
         currentload=int(entry["currentload"]),
         users=int(entry.get("users", 0)),
+        users_max=int(entry.get("users_max", 0)),
         bw=int(entry.get("bw", 0)),
         bw_max=int(entry.get("bw_max", 0)),
+        scorebase=int(entry.get("scorebase", 0)),
         ips_v4=ips_v4,
     )
 

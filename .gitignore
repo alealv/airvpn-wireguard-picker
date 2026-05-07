@@ -42,3 +42,4 @@ coverage.xml
 # Logs / state from local runs
 *.log
 state.json
+*.pyz

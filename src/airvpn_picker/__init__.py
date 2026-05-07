@@ -1,3 +1,3 @@
-"""Pick the fastest AirVPN WireGuard server by load and update a live wg peer endpoint."""
+"""Pick the best AirVPN WireGuard server by Eddie-style score and switch wg peer."""
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"

@@ -7,6 +7,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-05-07
+
+Eddie-compatible scoring with real ICMP ping measurement. The v0.1.0 picker
+ranked servers solely by AirVPN-reported `currentload`, which doesn't
+capture the path latency from your egress to the AirVPN edge. Servers with
+"low load" but a slow Berlin→Frankfurt hop went undetected and got stuck.
+
+This release adopts the scoring formula used by AirVPN's official Eddie
+client (`Lib.Core/ConnectionInfo.cs::Score()`):
+
+    score = ping_ms × W_ping
+          + load_pct × W_load
+          + users_pct × W_users
+          + scorebase
+          + penalty × W_penalty
+
+with `speed` and `latency` modes that mirror Eddie's two presets. Lower
+score wins. Hysteresis now applies in score space, not load space.
+
+### Added
+
+- `airvpn_picker.probe` — parallel ICMP ping via `/sbin/ping`. FreeBSD and
+  Linux compatible. Returns median RTT in ms; -1 on unreachable.
+- `airvpn_picker.scoring` — pure Eddie-compatible scoring with tunable
+  per-mode factors.
+- State file now caches per-IP ping EWMA (TTL 600s, alpha 0.3) so the
+  picker doesn't re-probe every server on every cron tick, and tracks
+  per-IP penalties with 6h decay for future post-switch handshake checks.
+- CLI flags: `--probe-ping/--no-probe-ping`, `--ping-count`,
+  `--ping-timeout`, `--ping-cache-ttl`, `--score-mode {speed,latency}`,
+  `--ping-factor`, `--load-factor`, `--users-factor`, `--penalty-factor`,
+  `--hysteresis-score`.
+- `Server` now exposes `users_max`, `scorebase`, and a `users_pct`
+  property — required to compute Eddie's full formula.
+- `contrib/build-pyz.sh` for reproducible zipapp builds.
+
+### Changed
+
+- **Breaking**: `selector.decide` now requires `ping_lookup` (and accepts
+  `penalty_lookup`) as keyword-only arguments.
+- **Breaking**: `--hysteresis-pp` was removed in favour of
+  `--hysteresis-score` (default 15 in score space). The old flag does not
+  alias.
+- **Breaking**: `Decision.reason` enum value `"load-improvement"` was
+  renamed to `"score-improvement"` to reflect the metric change.
+- `Decision` carries `winner_score`, `winner_ping_ms`, and
+  `current_score`; the JSON log now includes them.
+- The CLI probes ICMP only for servers that pass the geo+health+load
+  filter (plus the current endpoint), not the entire server pool.
+
+## [0.1.0] - 2026-04-09
+
 ### Fixed
 
 - `wg.set_endpoint` now uses peer remove + re-add instead of a naked

@@ -1,7 +1,7 @@
 [project]
 name = "airvpn-wireguard-picker"
-version = "0.1.0"
-description = "Pick the fastest AirVPN WireGuard server by load and update a live wg peer endpoint."
+version = "0.2.0"
+description = "Pick the best AirVPN WireGuard server by Eddie-style score (ping + load + users + scorebase + penalty) and update a live wg peer endpoint."
 readme = "README.md"
 license = { file = "LICENSE" }
 authors = [

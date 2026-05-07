@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-05-07
+
+Closes the loop on penalty tracking introduced in v0.2.0. Until now the
+penalty term in the Eddie score was always 0 — the state machinery
+existed but nothing incremented it. This release wires the obvious
+trigger: a switch that doesn't produce a fresh handshake within a few
+seconds is the strongest possible signal that the destination IP is
+broken (firewall, dead server, AirVPN-side maintenance).
+
+### Added
+
+- `wg.show_latest_handshake(interface, peer_pubkey)` — reads
+  `wg show <iface> latest-handshakes` and returns the unix epoch of
+  the most recent successful handshake (0 if never).
+- CLI orchestrates the post-switch verification automatically:
+  before `set_endpoint`, snapshot the handshake epoch; after, sleep
+  `--post-switch-wait` seconds (default 30s, just over WireGuard's
+  25s handshake interval) and re-read. If the epoch did not advance,
+  call `state.increment_penalty(ip)`. The penalty persists in the
+  state file with 6h decay so the next picker run de-prefers that
+  server by 1000 score points (default `--penalty-factor`).
+- New CLI flags: `--post-switch-check / --no-post-switch-check`
+  (default ON), `--post-switch-wait <seconds>`.
+
+### Changed
+
+- `cli.main` now imports `increment_penalty` and `show_latest_handshake`
+  alongside the existing helpers; no breaking API changes vs v0.2.
+
 ## [0.2.0] - 2026-05-07
 
 Eddie-compatible scoring with real ICMP ping measurement. The v0.1.0 picker
